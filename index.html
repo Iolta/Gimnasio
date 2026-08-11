@@ -68,15 +68,7 @@
         }
         .stopwatch-circle.running { color: var(--accent); font-weight: bold; }
         .stopwatch-controls { margin-top: 15px; display: flex; gap: 10px; }
-        .btn-stop { background: var(--card-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 8px 16px; font-family: inherit; cursor: pointer; }
-
-        /* Banner Alerta No Bloqueante */
-        .alarm-banner {
-            background: #2d1515; border: 1px solid #ff4444; color: #ff4444; padding: 15px;
-            margin-bottom: 25px; text-align: center; border-radius: var(--border-radius);
-            animation: pulse 1s infinite alternate;
-        }
-        @keyframes pulse { from { opacity: 0.8; } to { opacity: 1; } }
+        .btn-stop { background: var(--card-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 8px 16px; font-family: inherit; }
 
         /* Grilla Categorías */
         .categories-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 30px; }
@@ -195,13 +187,6 @@
     <!-- VISTA: HOY -->
     <main id="view-hoy" class="view active">
         
-        <!-- Banner de Alerta Activa (No bloqueante) -->
-        <div id="alarm-banner" class="alarm-banner" style="display: none;">
-            <div style="font-weight: bold; margin-bottom: 5px;">¡TIEMPO CUMPLIDO!</div>
-            <p style="color: #ff8a80; margin-bottom: 10px;">La actividad ha finalizado.</p>
-            <button class="btn-outline" style="border-color: #ff4444; color: #ff4444; margin:0;" onclick="dismissAlarm()">[ Detener Alarma ]</button>
-        </div>
-
         <!-- Panel de Sesión Diaria (Dinámico) -->
         <div id="session-panel" style="display: none; margin-bottom: 25px; padding: 15px; border: 1px solid var(--border-color); background: var(--card-bg); text-align: center;">
             <div style="color: var(--text-sec); margin-bottom: 10px; font-size: 14px; font-weight: bold;" id="session-info"></div>
@@ -371,24 +356,23 @@
         };
 
         let state = {
-            sessions: [], 
+            sessions: [], // Bloques de sesiones cerradas [{id, start, end, durationStr, exercises: []}]
             customActivities: { cardio: [], fuerza: [], elongacion: [], fisio: [] },
             settings: { syncEnabled: false, syncUrl: '' },
-            activeSession: null 
+            activeSession: null // { start: timestamp, exercises: [...] }
         };
 
         let currentActiveCategory = null;
 
-        /* --- SINTETIZADOR DE ALARMA NATIVO (API WEB AUDIO EN BUCLE) --- */
+        /* --- SINTETIZADOR DE ALARMA NATIVO (API WEB AUDIO) --- */
         let audioCtx = null;
-        let alarmInterval = null;
         
         function initAudio() {
             if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
             if (audioCtx.state === 'suspended') { audioCtx.resume(); }
         }
 
-        function playBeep() {
+        function playAlarm() {
             try {
                 if (!audioCtx) initAudio();
                 const osc = audioCtx.createOscillator();
@@ -398,30 +382,17 @@
                 osc.type = 'square';
                 
                 const now = audioCtx.currentTime;
-                osc.frequency.setValueAtTime(700, now);
-                osc.frequency.setValueAtTime(900, now + 0.15);
+                osc.frequency.setValueAtTime(600, now);
+                osc.frequency.setValueAtTime(800, now + 0.2);
+                osc.frequency.setValueAtTime(600, now + 0.4);
+                osc.frequency.setValueAtTime(800, now + 0.6);
+                osc.frequency.setValueAtTime(600, now + 0.8);
+                osc.frequency.setValueAtTime(800, now + 1.0);
                 
-                gain.gain.setValueAtTime(0.15, now);
+                gain.gain.setValueAtTime(0.1, now);
                 osc.start(now);
-                osc.stop(now + 0.3);
+                osc.stop(now + 1.2);
             } catch(e) { console.log("Audio no soportado"); }
-        }
-
-        function startAlarmLoop() {
-            initAudio();
-            playBeep();
-            if (alarmInterval) clearInterval(alarmInterval);
-            alarmInterval = setInterval(() => {
-                playBeep();
-            }, 800); // Repite el pitido cada 0.8s hasta que el usuario lo detenga
-        }
-
-        function dismissAlarm() {
-            if (alarmInterval) {
-                clearInterval(alarmInterval);
-                alarmInterval = null;
-            }
-            document.getElementById('alarm-banner').style.display = 'none';
         }
 
 
@@ -450,9 +421,14 @@
                     document.getElementById('sw-time').innerText = '00:00';
                     cancelCountdown();
                     
-                    // Dispara alarma continua y muestra el banner no bloqueante de inmediato
-                    startAlarmLoop();
-                    document.getElementById('alarm-banner').style.display = 'block';
+                    // 1. La alarma suena inmediatamente
+                    playAlarm();
+                    
+                    // 2. El mensaje sale después para que la alarma no espere ninguna acción humana
+                    setTimeout(() => {
+                        alert("¡Tiempo de la actividad cumplido!");
+                    }, 150);
+                    
                     return;
                 }
                 document.getElementById('sw-time').innerText = formatTime(countdownSeconds);
@@ -464,7 +440,7 @@
             document.getElementById('countdown-container').style.display = 'none';
         }
 
-        /* --- CIERRE DE SESIÓN DIARIA --- */
+        /* --- CÁLCULO Y CIERRE DE SESIÓN DIARIA GLOBAL --- */
         function endDailySession() {
             if (!state.activeSession || state.activeSession.exercises.length === 0) return;
 
@@ -486,7 +462,7 @@
             state.sessions.push(completedBlock);
             state.activeSession = null;
             saveData();
-            alert(`¡Sesión cerrada con éxito!\nTiempo total: ${durationStr}`);
+            alert(`¡Entrenamiento completado!\n\nTiempo total de esta sesión:\n> ${durationStr}`);
         }
 
 
@@ -516,6 +492,7 @@
                 state = JSON.parse(savedState);
                 if(!state.settings) state.settings = { syncEnabled: false, syncUrl: '' };
                 if(!state.sessions) state.sessions = [];
+                // Compatibilidad si venía de formato viejo
                 if(state.activeSessionStart) {
                     state.activeSession = { start: state.activeSessionStart, exercises: [...state.sessions] };
                     state.sessions = [];
@@ -565,7 +542,8 @@
             const sessionPanel = document.getElementById('session-panel');
             const sessionInfo = document.getElementById('session-info');
             const today = new Date().toLocaleDateString();
-
+            
+            // Si la sesión activa quedó de un día anterior, la cerramos automáticamente
             if (state.activeSession && new Date(state.activeSession.start).toLocaleDateString() !== today) {
                 const lastEx = state.activeSession.exercises[state.activeSession.exercises.length - 1];
                 const endTime = lastEx ? lastEx.timestamp : state.activeSession.start;
@@ -584,6 +562,7 @@
             const todayClosedBlocks = state.sessions.filter(b => new Date(b.start).toLocaleDateString() === today);
             let htmlContent = '';
 
+            // Renderizar sesiones cerradas de hoy con horario de inicio, cierre y duración
             if (todayClosedBlocks.length > 0) {
                 todayClosedBlocks.sort((a, b) => b.start - a.start).forEach(block => {
                     const startStr = new Date(block.start).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
@@ -602,6 +581,7 @@
                 });
             }
 
+            // Renderizar sesión activa actual
             if (state.activeSession && state.activeSession.exercises.length > 0) {
                 const startTime = new Date(state.activeSession.start).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
                 sessionInfo.innerText = `> Sesión Activa (Iniciada a las ${startTime})`;
@@ -688,14 +668,14 @@
 
         function renderSummary() {
             let totalMins = 0;
-            let totalSessionsCount = 0;
+            let totalExercisesCount = 0;
             const catCounts = { cardio: 0, fuerza: 0, elongacion: 0, fisio: 0 };
             
             const allBlocks = [...state.sessions];
             if (state.activeSession) allBlocks.push(state.activeSession);
 
             allBlocks.forEach(block => {
-                totalSessionsCount += block.exercises.length;
+                totalExercisesCount += block.exercises.length;
                 block.exercises.forEach(s => {
                     catCounts[s.category]++;
                     let m = s.metric || (s.duration + " min");
@@ -708,14 +688,14 @@
             document.getElementById('stat-total-time').innerText = totalMins > 60 
                 ? `${Math.floor(totalMins/60)}h ${totalMins%60}m` 
                 : `${totalMins} min`;
-            document.getElementById('stat-total-sessions').innerText = `> ${totalSessionsCount} ejercicios completados`;
+            document.getElementById('stat-total-sessions').innerText = `> ${allBlocks.length} sesiones completadas`;
 
             const progContainer = document.getElementById('progress-container');
             progContainer.innerHTML = '';
             
             for (let [id, cat] of Object.entries(CATEGORIES)) {
                 const count = catCounts[id];
-                const pct = totalSessionsCount === 0 ? 0 : Math.round((count / totalSessionsCount) * 100);
+                const pct = totalExercisesCount === 0 ? 0 : Math.round((count / totalExercisesCount) * 100);
                 
                 progContainer.innerHTML += `
                     <div class="progress-bar-container">
@@ -880,8 +860,6 @@
             if (state.settings.syncEnabled && state.settings.syncUrl) {
                 syncToCloud(newSession);
             }
-            
-            // Cierra el modal de forma garantizada
             closeAllModals();
 
             if (startTimer && timerMinutes > 0) {
