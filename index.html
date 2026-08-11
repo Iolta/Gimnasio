@@ -68,7 +68,15 @@
         }
         .stopwatch-circle.running { color: var(--accent); font-weight: bold; }
         .stopwatch-controls { margin-top: 15px; display: flex; gap: 10px; }
-        .btn-stop { background: var(--card-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 8px 16px; font-family: inherit; }
+        .btn-stop { background: var(--card-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 8px 16px; font-family: inherit; cursor: pointer; }
+
+        /* Banner Alerta No Bloqueante */
+        .alarm-banner {
+            background: #2d1515; border: 1px solid #ff4444; color: #ff4444; padding: 15px;
+            margin-bottom: 25px; text-align: center; border-radius: var(--border-radius);
+            animation: pulse 1s infinite alternate;
+        }
+        @keyframes pulse { from { opacity: 0.8; } to { opacity: 1; } }
 
         /* Grilla Categorías */
         .categories-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 30px; }
@@ -187,6 +195,13 @@
     <!-- VISTA: HOY -->
     <main id="view-hoy" class="view active">
         
+        <!-- Banner de Alerta Activa (No bloqueante) -->
+        <div id="alarm-banner" class="alarm-banner" style="display: none;">
+            <div style="font-weight: bold; margin-bottom: 5px;">¡TIEMPO CUMPLIDO!</div>
+            <p style="color: #ff8a80; margin-bottom: 10px;">La actividad ha finalizado.</p>
+            <button class="btn-outline" style="border-color: #ff4444; color: #ff4444; margin:0;" onclick="dismissAlarm()">[ Detener Alarma ]</button>
+        </div>
+
         <!-- Panel de Sesión Diaria (Dinámico) -->
         <div id="session-panel" style="display: none; margin-bottom: 25px; padding: 15px; border: 1px solid var(--border-color); background: var(--card-bg); text-align: center;">
             <div style="color: var(--text-sec); margin-bottom: 10px; font-size: 14px; font-weight: bold;" id="session-info"></div>
@@ -356,23 +371,24 @@
         };
 
         let state = {
-            sessions: [], // Array de bloques de sesiones diarias completas
+            sessions: [], 
             customActivities: { cardio: [], fuerza: [], elongacion: [], fisio: [] },
             settings: { syncEnabled: false, syncUrl: '' },
-            activeSession: null // { start: timestamp, exercises: [...] }
+            activeSession: null 
         };
 
         let currentActiveCategory = null;
 
-        /* --- SINTETIZADOR DE ALARMA NATIVO (API WEB AUDIO) --- */
+        /* --- SINTETIZADOR DE ALARMA NATIVO (API WEB AUDIO EN BUCLE) --- */
         let audioCtx = null;
+        let alarmInterval = null;
         
         function initAudio() {
             if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
             if (audioCtx.state === 'suspended') { audioCtx.resume(); }
         }
 
-        function playAlarm() {
+        function playBeep() {
             try {
                 if (!audioCtx) initAudio();
                 const osc = audioCtx.createOscillator();
@@ -382,17 +398,30 @@
                 osc.type = 'square';
                 
                 const now = audioCtx.currentTime;
-                osc.frequency.setValueAtTime(600, now);
-                osc.frequency.setValueAtTime(800, now + 0.2);
-                osc.frequency.setValueAtTime(600, now + 0.4);
-                osc.frequency.setValueAtTime(800, now + 0.6);
-                osc.frequency.setValueAtTime(600, now + 0.8);
-                osc.frequency.setValueAtTime(800, now + 1.0);
+                osc.frequency.setValueAtTime(700, now);
+                osc.frequency.setValueAtTime(900, now + 0.15);
                 
-                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.setValueAtTime(0.15, now);
                 osc.start(now);
-                osc.stop(now + 1.2);
+                osc.stop(now + 0.3);
             } catch(e) { console.log("Audio no soportado"); }
+        }
+
+        function startAlarmLoop() {
+            initAudio();
+            playBeep();
+            if (alarmInterval) clearInterval(alarmInterval);
+            alarmInterval = setInterval(() => {
+                playBeep();
+            }, 800); // Repite el pitido cada 0.8s hasta que el usuario lo detenga
+        }
+
+        function dismissAlarm() {
+            if (alarmInterval) {
+                clearInterval(alarmInterval);
+                alarmInterval = null;
+            }
+            document.getElementById('alarm-banner').style.display = 'none';
         }
 
 
@@ -420,12 +449,10 @@
                     clearInterval(countdownInterval);
                     document.getElementById('sw-time').innerText = '00:00';
                     cancelCountdown();
-                    // 1. Suena la alarma primero de forma inmediata
-                    playAlarm();
-                    // 2. Luego se muestra el aviso visual para que el usuario acepte después
-                    setTimeout(() => {
-                        alert("¡Tiempo de la actividad cumplido!");
-                    }, 100);
+                    
+                    // Dispara alarma continua y muestra el banner no bloqueante de inmediato
+                    startAlarmLoop();
+                    document.getElementById('alarm-banner').style.display = 'block';
                     return;
                 }
                 document.getElementById('sw-time').innerText = formatTime(countdownSeconds);
@@ -489,7 +516,6 @@
                 state = JSON.parse(savedState);
                 if(!state.settings) state.settings = { syncEnabled: false, syncUrl: '' };
                 if(!state.sessions) state.sessions = [];
-                // Compatibilidad con formato anterior si existía
                 if(state.activeSessionStart) {
                     state.activeSession = { start: state.activeSessionStart, exercises: [...state.sessions] };
                     state.sessions = [];
@@ -540,9 +566,7 @@
             const sessionInfo = document.getElementById('session-info');
             const today = new Date().toLocaleDateString();
 
-            // Validar si la sesión activa es de un día anterior
             if (state.activeSession && new Date(state.activeSession.start).toLocaleDateString() !== today) {
-                // Si quedó abierta de ayer, la cerramos automáticamente
                 const lastEx = state.activeSession.exercises[state.activeSession.exercises.length - 1];
                 const endTime = lastEx ? lastEx.timestamp : state.activeSession.start;
                 const diffMs = endTime - state.activeSession.start;
@@ -557,12 +581,9 @@
                 state.activeSession = null;
             }
 
-            // Filtrar bloques cerrados de hoy
             const todayClosedBlocks = state.sessions.filter(b => new Date(b.start).toLocaleDateString() === today);
-
             let htmlContent = '';
 
-            // Renderizar bloques ya cerrados de hoy
             if (todayClosedBlocks.length > 0) {
                 todayClosedBlocks.sort((a, b) => b.start - a.start).forEach(block => {
                     const startStr = new Date(block.start).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
@@ -581,7 +602,6 @@
                 });
             }
 
-            // Renderizar bloque activo actual si existe
             if (state.activeSession && state.activeSession.exercises.length > 0) {
                 const startTime = new Date(state.activeSession.start).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
                 sessionInfo.innerText = `> Sesión Activa (Iniciada a las ${startTime})`;
@@ -613,7 +633,6 @@
             const container = document.getElementById('historial-container');
             const allBlocks = [...state.sessions];
 
-            // Si hay una sesión activa, también la mostramos en el historial general
             if (state.activeSession && state.activeSession.exercises.length > 0) {
                 allBlocks.push({
                     id: 'active',
@@ -629,7 +648,6 @@
                 return;
             }
 
-            // Agrupar por fecha
             const grouped = {};
             allBlocks.forEach(block => {
                 const date = new Date(block.start).toLocaleDateString();
@@ -740,7 +758,6 @@
             
             document.getElementById('modal-title').innerHTML = `## ${cat.name}`;
             
-            // Clean inputs
             document.getElementById('input-new-activity').value = '';
             document.getElementById('input-duration').value = '';
             document.getElementById('input-sets').value = '';
@@ -748,13 +765,11 @@
             document.getElementById('input-weight').value = '';
             document.getElementById('input-notes').value = '';
 
-            // Render Pills
             renderPills('pills-zone', cat.defZones);
             const allActivities = cat.defActs.concat(state.customActivities[categoryId]);
             renderPills('pills-activity', allActivities);
             document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
 
-            // Alternar vista
             if (categoryId === 'fuerza') {
                 document.getElementById('group-duration').style.display = 'none';
                 document.getElementById('group-reps').style.display = 'block';
@@ -852,7 +867,6 @@
                 notes: notes
             };
 
-            // Gestionar la sesión activa
             if (!state.activeSession) {
                 state.activeSession = {
                     start: newSession.timestamp,
@@ -866,6 +880,8 @@
             if (state.settings.syncEnabled && state.settings.syncUrl) {
                 syncToCloud(newSession);
             }
+            
+            // Cierra el modal de forma garantizada
             closeAllModals();
 
             if (startTimer && timerMinutes > 0) {
@@ -947,8 +963,6 @@
             reader.onload = function(e) {
                 const lines = e.target.result.split('\n');
                 let imported = 0;
-                
-                // Mapeo temporal para agrupar ejercicios importados por su sesión (usando la hora de inicio como clave)
                 const tempSessions = {};
 
                 for(let i = 1; i < lines.length; i++) {
@@ -974,7 +988,6 @@
                         const metric = matches[8];
                         const notes = matches[9] || "";
 
-                        // Reconstruir timestamp aproximado de inicio
                         const startTimestamp = new Date(`${dateStr} ${startStr}`).getTime() || Date.now();
                         const endTimestamp = new Date(`${dateStr} ${endStr}`).getTime() || startTimestamp;
 
@@ -1003,7 +1016,6 @@
                     }
                 }
 
-                // Volcar al estado
                 for(let key in tempSessions) {
                     state.sessions.push(tempSessions[key]);
                 }
