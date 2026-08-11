@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Rehab Tracker</title>
+    <meta name="theme-color" content="#111111">
+    <style>
+        :root {
+            --bg-color: #111111;
+            --card-bg: #1e1e1e;
+            --text-main: #ffffff;
+            --text-sec: #bbbbbb;
+            --border-radius: 14px;
+            --nav-height: 70px;
+            
+            /* Categorías */
+            --color-cardio: #82b1ff;
+            --color-fuerza: #b388ff;
+            --color-elongacion: #b9f6ca;
+            --color-fisio: #ff8a80;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-tap-highlight-color: transparent; }
+        
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            padding-bottom: calc(var(--nav-height) + 20px);
+            overflow-x: hidden;
+        }
+
+        /* Tipografía y Textos */
+        h1, h2, h3 { font-weight: 600; }
+        p, span, label { font-size: 14px; color: var(--text-sec); }
+        
+        /* Header */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            background: rgba(17, 17, 17, 0.9);
+            backdrop-filter: blur(10px);
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+        .header-actions button {
+            background: none; border: none; color: var(--text-main); font-size: 24px; padding: 5px; cursor: pointer;
+        }
+
+        /* Layout Vistas */
+        .view { display: none; padding: 0 20px; animation: fadeIn 0.3s ease; }
+        .view.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* Cronómetro (Hoy) */
+        .stopwatch-container {
+            display: flex; flex-direction: column; align-items: center; margin-bottom: 30px;
+        }
+        .stopwatch-circle {
+            width: 200px; height: 200px; border-radius: 50%;
+            border: 4px solid var(--card-bg);
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            font-size: 42px; font-variant-numeric: tabular-nums;
+            cursor: pointer; transition: border-color 0.3s;
+        }
+        .stopwatch-circle.running { border-color: var(--color-cardio); color: var(--color-cardio); }
+        .stopwatch-controls { margin-top: 15px; display: flex; gap: 10px; }
+        .btn-stop { background: var(--card-bg); color: var(--text-main); border: none; padding: 10px 20px; border-radius: 20px; display: none; }
+
+        /* Grilla Categorías */
+        .categories-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 30px; }
+        .category-card {
+            background: var(--card-bg); border-radius: var(--border-radius); padding: 20px;
+            text-align: center; cursor: pointer; border: 1px solid transparent; transition: 0.2s;
+        }
+        .category-card:active { transform: scale(0.96); }
+        .cat-emoji { font-size: 32px; margin-bottom: 10px; display: block; }
+        .cat-title { font-size: 16px; font-weight: 500; }
+
+        /* Registro y Listas */
+        .section-title { font-size: 18px; margin-bottom: 15px; border-bottom: 1px solid #333; padding-bottom: 5px; }
+        .log-list { display: flex; flex-direction: column; gap: 10px; }
+        .log-item { background: var(--card-bg); padding: 15px; border-radius: var(--border-radius); display: flex; justify-content: space-between; align-items: center; border-left: 4px solid #555; }
+        .log-details h4 { font-size: 16px; margin-bottom: 4px; }
+        .log-details p { font-size: 13px; }
+        .log-time { font-weight: bold; font-size: 16px; }
+
+        /* Resumen */
+        .stat-card { background: var(--card-bg); padding: 20px; border-radius: var(--border-radius); text-align: center; margin-bottom: 20px; }
+        .stat-card h2 { font-size: 32px; margin: 10px 0; }
+        .progress-bar-container { margin-bottom: 15px; }
+        .progress-info { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 5px; }
+        .progress-track { width: 100%; height: 8px; background: #333; border-radius: 4px; overflow: hidden; }
+        .progress-fill { height: 100%; background: var(--text-main); border-radius: 4px; transition: width 0.5s ease; }
+
+        /* Modals (Bottom Sheet) */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6); z-index: 100; display: none; opacity: 0; transition: opacity 0.3s;
+        }
+        .modal {
+            position: fixed; bottom: -100%; left: 0; width: 100%; height: 85vh;
+            background: var(--bg-color); border-radius: 20px 20px 0 0; z-index: 101;
+            padding: 25px; transition: bottom 0.3s cubic-bezier(0.1, 0.9, 0.2, 1);
+            overflow-y: auto; display: flex; flex-direction: column;
+        }
+        .modal.active { bottom: 0; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .btn-close { background: #333; color: white; border: none; border-radius: 50%; width: 30px; height: 30px; font-weight: bold; }
+
+        /* Formularios y Píldoras */
+        .form-group { margin-bottom: 25px; }
+        .form-group label { display: block; margin-bottom: 10px; font-weight: 500; color: white;}
+        .pills-container { display: flex; flex-wrap: wrap; gap: 10px; }
+        .pill {
+            background: #333; color: var(--text-sec); padding: 10px 16px;
+            border-radius: 20px; font-size: 14px; border: 1px solid transparent; cursor: pointer;
+        }
+        .pill.active { background: #444; color: white; border-color: white; }
+        
+        .input-row { display: flex; gap: 10px; margin-top: 10px; }
+        input[type="text"], input[type="number"], textarea {
+            flex: 1; background: var(--card-bg); border: 1px solid #333;
+            color: white; padding: 12px; border-radius: var(--border-radius); font-size: 16px; font-family: inherit;
+        }
+        textarea { resize: none; height: 80px; }
+        .btn-add { background: #333; color: white; border: none; padding: 0 20px; border-radius: var(--border-radius); font-size: 20px; }
+        
+        .btn-submit {
+            background: white; color: black; border: none; padding: 15px;
+            border-radius: var(--border-radius); font-size: 16px; font-weight: bold;
+            width: 100%; margin-top: auto;
+        }
+
+        /* Ajustes específicos de color mediante clases */
+        .modal.theme-cardio .pill.active { background: rgba(130, 177, 255, 0.2); border-color: var(--color-cardio); color: var(--color-cardio); }
+        .modal.theme-fuerza .pill.active { background: rgba(179, 136, 255, 0.2); border-color: var(--color-fuerza); color: var(--color-fuerza); }
+        .modal.theme-elongacion .pill.active { background: rgba(185, 246, 202, 0.2); border-color: var(--color-elongacion); color: var(--color-elongacion); }
+        .modal.theme-fisio .pill.active { background: rgba(255, 138, 128, 0.2); border-color: var(--color-fisio); color: var(--color-fisio); }
+
+        /* Menú Inferior */
+        nav {
+            position: fixed; bottom: 0; left: 0; width: 100%; height: var(--nav-height);
+            background: rgba(30, 30, 30, 0.95); backdrop-filter: blur(10px);
+            display: flex; justify-content: space-around; align-items: center;
+            border-top: 1px solid #333; z-index: 50;
+        }
+        .nav-btn {
+            background: none; border: none; color: var(--text-sec); display: flex;
+            flex-direction: column; align-items: center; gap: 5px; font-size: 12px;
+        }
+        .nav-btn.active { color: var(--text-main); }
+        .nav-btn span { font-size: 20px; }
+
+        /* Settings Switch */
+        .switch-container { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: var(--card-bg); border-radius: var(--border-radius); margin-bottom: 15px; }
+        .switch { position: relative; display: inline-block; width: 50px; height: 28px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #333; transition: .4s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: #4CAF50; }
+        input:checked + .slider:before { transform: translateX(22px); }
+
+        .btn-danger { background: #3a1c1c; border: 1px solid #ff4444; color: #ff4444; width: 100%; padding: 15px; border-radius: var(--border-radius); margin-top: 20px; font-weight: bold; }
+        .btn-outline { background: transparent; border: 1px solid #555; color: white; width: 100%; padding: 15px; border-radius: var(--border-radius); margin-top: 10px; font-weight: bold; }
+
+    </style>
+</head>
+<body>
+
+    <header>
+        <h2>Rehab Tracker</h2>
+        <div class="header-actions">
+            <button onclick="openSettings()">⚙️</button>
+        </div>
+    </header>
+
+    <!-- VISTA: HOY -->
+    <main id="view-hoy" class="view active">
+        <!-- Cronómetro pasivo -->
+        <div class="stopwatch-container">
+            <div class="stopwatch-circle" id="stopwatch" onclick="toggleStopwatch()">
+                <div id="sw-time">00:00</div>
+                <div style="font-size: 14px; color: var(--text-sec); margin-top: 5px;" id="sw-label">Tocar para iniciar</div>
+            </div>
+            <div class="stopwatch-controls">
+                <button class="btn-stop" id="btn-sw-stop" onclick="stopAndLogStopwatch()">Guardar</button>
+                <button class="btn-stop" id="btn-sw-reset" onclick="resetStopwatch()" style="background:#333">Descartar</button>
+            </div>
+        </div>
+
+        <div class="categories-grid" id="categories-grid">
+            <!-- Inyectado por JS -->
+        </div>
+
+        <h3 class="section-title">Registro de Hoy</h3>
+        <div class="log-list" id="log-hoy">
+            <!-- Inyectado por JS -->
+        </div>
+    </main>
+
+    <!-- VISTA: HISTORIAL -->
+    <main id="view-historial" class="view">
+        <h3 class="section-title">Historial Completo</h3>
+        <div id="historial-container">
+            <!-- Inyectado por JS -->
+        </div>
+    </main>
+
+    <!-- VISTA: RESUMEN -->
+    <main id="view-resumen" class="view">
+        <div class="stat-card">
+            <p>Tiempo Total de Rehabilitación</p>
+            <h2 id="stat-total-time">0 min</h2>
+            <p id="stat-total-sessions">0 sesiones completadas</p>
+        </div>
+        <h3 class="section-title">Distribución por Categoría</h3>
+        <div id="progress-container">
+            <!-- Inyectado por JS -->
+        </div>
+    </main>
+
+    <!-- MENÚ INFERIOR -->
+    <nav>
+        <button class="nav-btn active" onclick="switchTab('hoy')"><span>⚡</span>Hoy</button>
+        <button class="nav-btn" onclick="switchTab('historial')"><span>🗓️</span>Historial</button>
+        <button class="nav-btn" onclick="switchTab('resumen')"><span>📊</span>Resumen</button>
+    </nav>
+
+    <!-- MODAL OVERLAY -->
+    <div class="modal-overlay" id="modal-overlay" onclick="closeAllModals()"></div>
+
+    <!-- MODAL: NUEVA SESIÓN -->
+    <div class="modal" id="modal-session">
+        <div class="modal-header">
+            <h2 id="modal-title">Nueva Sesión</h2>
+            <button class="btn-close" onclick="closeAllModals()">✕</button>
+        </div>
+        
+        <div class="form-group">
+            <label>Instructor / Zona</label>
+            <div class="pills-container" id="pills-zone"></div>
+        </div>
+
+        <div class="form-group">
+            <label>Actividad</label>
+            <div class="pills-container" id="pills-activity"></div>
+            <div class="input-row">
+                <input type="text" id="input-new-activity" placeholder="Nueva actividad...">
+                <button class="btn-add" onclick="addCustomActivity()">+</button>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>Duración (minutos)</label>
+            <div class="pills-container" id="pills-duration">
+                <div class="pill" onclick="selectPill(this, 'duration')">5</div>
+                <div class="pill" onclick="selectPill(this, 'duration')">10</div>
+                <div class="pill" onclick="selectPill(this, 'duration')">15</div>
+                <div class="pill" onclick="selectPill(this, 'duration')">20</div>
+                <div class="pill" onclick="selectPill(this, 'duration')">30</div>
+                <div class="pill" onclick="selectPill(this, 'duration')">45</div>
+                <div class="pill" onclick="selectPill(this, 'duration')">60</div>
+            </div>
+            <div class="input-row">
+                <input type="number" id="input-duration" placeholder="O ingresa minutos libres...">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>Notas adicionales</label>
+            <textarea id="input-notes" placeholder="Pesos, repeticiones, tolerancia al dolor..."></textarea>
+        </div>
+
+        <button class="btn-submit" onclick="saveSession()">Guardar Sesión</button>
+    </div>
+
+    <!-- MODAL: CONFIGURACIÓN -->
+    <div class="modal" id="modal-settings">
+        <div class="modal-header">
+            <h2>Configuración</h2>
+            <button class="btn-close" onclick="closeAllModals()">✕</button>
+        </div>
+        
+        <div class="switch-container">
+            <div>
+                <strong>Sincronización en la Nube</strong>
+                <p style="font-size:12px; margin-top:4px;">Enviar JSON por POST a Google Apps Script</p>
+            </div>
+            <label class="switch">
+                <input type="checkbox" id="toggle-sync" onchange="toggleSyncUrl()">
+                <span class="slider"></span>
+            </label>
+        </div>
+        <div class="form-group" id="sync-url-group" style="display:none;">
+            <label>URL del Web App (GAS POST)</label>
+            <input type="text" id="input-sync-url" placeholder="https://script.google.com/macros/s/.../exec">
+            <button class="btn-outline" onclick="saveSettings()">Guardar URL</button>
+        </div>
+
+        <h3 class="section-title" style="margin-top:20px;">Datos y Backups</h3>
+        <button class="btn-outline" onclick="exportCSV()">📤 Exportar Historial (CSV)</button>
+        
+        <input type="file" id="file-import" accept=".csv" style="display:none;" onchange="importCSV(event)">
+        <button class="btn-outline" onclick="document.getElementById('file-import').click()">📥 Importar Backup (CSV)</button>
+
+        <button class="btn-danger" onclick="clearAllData()">⚠️ Borrar Todos los Datos</button>
+    </div>
+
+    <script>
+        /* --- ESTADO Y CONFIGURACIÓN --- */
+        const CATEGORIES = {
+            'cardio': { name: 'Cardio', emoji: '🏃', color: 'var(--color-cardio)', defZones: ['General', 'Tren Inferior'], defActs: ['Cinta', 'Bicicleta', 'Elíptico'] },
+            'fuerza': { name: 'Fuerza', emoji: '🏋️', color: 'var(--color-fuerza)', defZones: ['Brazos', 'Piernas', 'Core', 'Espalda'], defActs: ['Mancuernas', 'Máquinas', 'Bandas elásticas'] },
+            'elongacion': { name: 'Elongación', emoji: '🧘', color: 'var(--color-elongacion)', defZones: ['Tren Superior', 'Tren Inferior', 'Lumbar'], defActs: ['Estiramiento estático', 'Rodillo de espuma', 'Yoga'] },
+            'fisio': { name: 'Fisioterapia', emoji: '🩹', color: 'var(--color-fisio)', defZones: ['Hombro', 'Rodilla', 'Tobillo', 'Cervical'], defActs: ['TENS', 'Magnetoterapia', 'Ejercicios guiados'] }
+        };
+
+        let state = {
+            sessions: [],
+            customActivities: { cardio: [], fuerza: [], elongacion: [], fisio: [] },
+            settings: { syncEnabled: false, syncUrl: '' }
+        };
+
+        let currentActiveCategory = null;
+
+        /* --- CRONÓMETRO --- */
+        let swInterval;
+        let swSeconds = 0;
+        let swIsRunning = false;
+
+        function formatTime(sec) {
+            const m = Math.floor(sec / 60).toString().padStart(2, '0');
+            const s = (sec % 60).toString().padStart(2, '0');
+            return `${m}:${s}`;
+        }
+
+        function toggleStopwatch() {
+            const circle = document.getElementById('stopwatch');
+            const label = document.getElementById('sw-label');
+            const btnStop = document.getElementById('btn-sw-stop');
+            const btnReset = document.getElementById('btn-sw-reset');
+
+            if (swIsRunning) {
+                // Pausar
+                clearInterval(swInterval);
+                swIsRunning = false;
+                circle.classList.remove('running');
+                label.innerText = 'Pausado (Tocar para reanudar)';
+            } else {
+                // Iniciar
+                swIsRunning = true;
+                circle.classList.add('running');
+                label.innerText = 'Corriendo...';
+                btnStop.style.display = 'block';
+                btnReset.style.display = 'block';
+                
+                swInterval = setInterval(() => {
+                    swSeconds++;
+                    document.getElementById('sw-time').innerText = formatTime(swSeconds);
+                }, 1000);
+            }
+        }
+
+        function stopAndLogStopwatch() {
+            if (swSeconds < 60) {
+                alert("El tiempo es menor a 1 minuto.");
+                return;
+            }
+            clearInterval(swInterval);
+            swIsRunning = false;
+            
+            let mins = Math.floor(swSeconds / 60);
+            resetStopwatch();
+            
+            // Abre modal de la primera categoría (o Cardio por defecto) prellenando el tiempo
+            openSessionModal('cardio'); 
+            document.getElementById('input-duration').value = mins;
+        }
+
+        function resetStopwatch() {
+            clearInterval(swInterval);
+            swIsRunning = false;
+            swSeconds = 0;
+            document.getElementById('sw-time').innerText = '00:00';
+            document.getElementById('sw-label').innerText = 'Tocar para iniciar';
+            document.getElementById('stopwatch').classList.remove('running');
+            document.getElementById('btn-sw-stop').style.display = 'none';
+            document.getElementById('btn-sw-reset').style.display = 'none';
+        }
+
+
+        /* --- INICIALIZACIÓN --- */
+        function init() {
+            loadData();
+            renderCategoryGrid();
+            renderTodayLog();
+            renderHistory();
+            renderSummary();
+            
+            // Sync settings init
+            document.getElementById('toggle-sync').checked = state.settings.syncEnabled;
+            document.getElementById('input-sync-url').value = state.settings.syncUrl;
+            toggleSyncUrl();
+        }
+
+        function loadData() {
+            const savedState = localStorage.getItem('rehab_state');
+            if (savedState) {
+                state = JSON.parse(savedState);
+                if(!state.settings) state.settings = { syncEnabled: false, syncUrl: '' };
+            }
+        }
+
+        function saveData() {
+            localStorage.setItem('rehab_state', JSON.stringify(state));
+            renderTodayLog();
+            renderHistory();
+            renderSummary();
+        }
+
+        /* --- UI RENDERIZADO --- */
+        function renderCategoryGrid() {
+            const grid = document.getElementById('categories-grid');
+            grid.innerHTML = '';
+            for (let [id, cat] of Object.entries(CATEGORIES)) {
+                grid.innerHTML += `
+                    <div class="category-card" onclick="openSessionModal('${id}')">
+                        <span class="cat-emoji">${cat.emoji}</span>
+                        <div class="cat-title" style="color: ${cat.color}">${cat.name}</div>
+                    </div>
+                `;
+            }
+        }
+
+        function getLogHtml(session) {
+            const cat = CATEGORIES[session.category];
+            const dateStr = new Date(session.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            return `
+                <div class="log-item" style="border-left-color: ${cat.color}">
+                    <div class="log-details">
+                        <h4>${cat.emoji} ${session.activity}</h4>
+                        <p>${session.zone} • ${session.notes ? session.notes : 'Sin notas'}</p>
+                    </div>
+                    <div class="log-time">${session.duration} min</div>
+                </div>
+            `;
+        }
+
+        function renderTodayLog() {
+            const container = document.getElementById('log-hoy');
+            const today = new Date().toLocaleDateString();
+            
+            const todaySessions = state.sessions.filter(s => new Date(s.timestamp).toLocaleDateString() === today);
+            
+            if (todaySessions.length === 0) {
+                container.innerHTML = '<p style="text-align:center; padding: 20px;">No hay registros hoy. ¡Arranca una sesión!</p>';
+                return;
+            }
+            
+            // Ordenar de más reciente a más antiguo
+            todaySessions.sort((a, b) => b.timestamp - a.timestamp);
+            container.innerHTML = todaySessions.map(getLogHtml).join('');
+        }
+
+        function renderHistory() {
+            const container = document.getElementById('historial-container');
+            if (state.sessions.length === 0) {
+                container.innerHTML = '<p>El historial está vacío.</p>';
+                return;
+            }
+
+            // Agrupar por fecha
+            const grouped = state.sessions.reduce((acc, session) => {
+                const date = new Date(session.timestamp).toLocaleDateString();
+                if (!acc[date]) acc[date] = [];
+                acc[date].push(session);
+                return acc;
+            }, {});
+
+            let html = '';
+            const sortedDates = Object.keys(grouped).sort((a, b) => {
+                const partsA = a.split('/'); const partsB = b.split('/');
+                return new Date(partsB[2], partsB[1]-1, partsB[0]) - new Date(partsA[2], partsA[1]-1, partsA[0]);
+            });
+
+            for (let date of sortedDates) {
+                html += `<div style="margin-bottom: 25px;">
+                            <div style="font-weight: bold; margin-bottom: 10px; color: var(--text-sec)">${date}</div>
+                            <div class="log-list">
+                                ${grouped[date].sort((a, b) => b.timestamp - a.timestamp).map(getLogHtml).join('')}
+                            </div>
+                         </div>`;
+            }
+            container.innerHTML = html;
+        }
+
+        function renderSummary() {
+            const totalMins = state.sessions.reduce((acc, s) => acc + parseInt(s.duration), 0);
+            document.getElementById('stat-total-time').innerText = totalMins > 60 
+                ? `${Math.floor(totalMins/60)}h ${totalMins%60}m` 
+                : `${totalMins} min`;
+            document.getElementById('stat-total-sessions').innerText = `${state.sessions.length} sesiones completadas`;
+
+            const catTotals = { cardio: 0, fuerza: 0, elongacion: 0, fisio: 0 };
+            state.sessions.forEach(s => {
+                if (catTotals[s.category] !== undefined) catTotals[s.category] += parseInt(s.duration);
+            });
+
+            const progContainer = document.getElementById('progress-container');
+            progContainer.innerHTML = '';
+            
+            for (let [id, cat] of Object.entries(CATEGORIES)) {
+                const mins = catTotals[id];
+                const pct = totalMins === 0 ? 0 : Math.round((mins / totalMins) * 100);
+                
+                progContainer.innerHTML += `
+                    <div class="progress-bar-container">
+                        <div class="progress-info">
+                            <span>${cat.emoji} ${cat.name}</span>
+                            <span>${pct}% (${mins}m)</span>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-fill" style="width: ${pct}%; background-color: ${cat.color}"></div>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        /* --- NAVEGACIÓN Y MODALS --- */
+        function switchTab(tabId) {
+            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+            
+            document.getElementById(`view-${tabId}`).classList.add('active');
+            event.currentTarget.classList.add('active');
+        }
+
+        function closeAllModals() {
+            document.querySelectorAll('.modal').forEach(m => m.classList.remove('active'));
+            document.getElementById('modal-overlay').style.opacity = '0';
+            setTimeout(() => { document.getElementById('modal-overlay').style.display = 'none'; }, 300);
+        }
+
+        function showModal(id) {
+            document.getElementById('modal-overlay').style.display = 'block';
+            setTimeout(() => { document.getElementById('modal-overlay').style.opacity = '1'; }, 10);
+            document.getElementById(id).classList.add('active');
+        }
+
+        /* --- LÓGICA DEL FORMULARIO DE SESIÓN --- */
+        function openSessionModal(categoryId) {
+            currentActiveCategory = categoryId;
+            const cat = CATEGORIES[categoryId];
+            
+            // Reset modal visual theme
+            const modal = document.getElementById('modal-session');
+            modal.className = `modal theme-${categoryId}`;
+            document.getElementById('modal-title').innerHTML = `${cat.emoji} Nueva Sesión de ${cat.name}`;
+            
+            // Clean fields
+            document.getElementById('input-new-activity').value = '';
+            document.getElementById('input-duration').value = '';
+            document.getElementById('input-notes').value = '';
+
+            // Render Pills
+            renderPills('pills-zone', cat.defZones);
+            const allActivities = cat.defActs.concat(state.customActivities[categoryId]);
+            renderPills('pills-activity', allActivities);
+            
+            // Reset duration pills
+            document.querySelectorAll('#pills-duration .pill').forEach(p => p.classList.remove('active'));
+
+            showModal('modal-session');
+        }
+
+        function renderPills(containerId, items) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = items.map(item => `<div class="pill" onclick="selectPill(this, '${containerId}')">${item}</div>`).join('');
+        }
+
+        function selectPill(element, group) {
+            // Comportamiento radio (única selección por grupo)
+            const parent = element.parentElement;
+            parent.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+            element.classList.add('active');
+            
+            // Si elige duración por pastilla, limpia el input libre
+            if (group === 'duration') {
+                document.getElementById('input-duration').value = '';
+            }
+        }
+
+        document.getElementById('input-duration').addEventListener('input', () => {
+            document.querySelectorAll('#pills-duration .pill').forEach(p => p.classList.remove('active'));
+        });
+
+        function addCustomActivity() {
+            const input = document.getElementById('input-new-activity');
+            const val = input.value.trim();
+            if (val && currentActiveCategory) {
+                state.customActivities[currentActiveCategory].push(val);
+                saveData(); // Persist new activity
+                openSessionModal(currentActiveCategory); // Re-render pills
+            }
+        }
+
+        function saveSession() {
+            const activeZone = document.querySelector('#pills-zone .pill.active');
+            const activeAct = document.querySelector('#pills-activity .pill.active');
+            const activeDur = document.querySelector('#pills-duration .pill.active');
+            const inputDur = document.getElementById('input-duration').value;
+            
+            const zone = activeZone ? activeZone.innerText : 'General';
+            const activity = activeAct ? activeAct.innerText : 'Entrenamiento';
+            const duration = inputDur ? parseInt(inputDur) : (activeDur ? parseInt(activeDur.innerText) : 0);
+            const notes = document.getElementById('input-notes').value.trim();
+
+            if (duration <= 0) {
+                alert("Por favor indica una duración válida.");
+                return;
+            }
+
+            const newSession = {
+                id: Date.now().toString(),
+                timestamp: Date.now(),
+                category: currentActiveCategory,
+                zone: zone,
+                activity: activity,
+                duration: duration,
+                notes: notes
+            };
+
+            state.sessions.push(newSession);
+            saveData();
+            
+            // Trigger Cloud Sync si está activo
+            if (state.settings.syncEnabled && state.settings.syncUrl) {
+                syncToCloud(newSession);
+            }
+
+            closeAllModals();
+        }
+
+        /* --- CLOUD SYNC (Google Apps Script) --- */
+        async function syncToCloud(payload) {
+            try {
+                fetch(state.settings.syncUrl, {
+                    method: 'POST',
+                    mode: 'no-cors', // Evita bloqueos de CORS estándar de GAS
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                }).catch(e => console.error("Sync en segundo plano falló:", e));
+            } catch (err) {
+                console.error("Error al disparar sync", err);
+            }
+        }
+
+        /* --- CONFIGURACIÓN Y BACKUPS --- */
+        function openSettings() {
+            showModal('modal-settings');
+        }
+
+        function toggleSyncUrl() {
+            const isChecked = document.getElementById('toggle-sync').checked;
+            document.getElementById('sync-url-group').style.display = isChecked ? 'block' : 'none';
+        }
+
+        function saveSettings() {
+            state.settings.syncEnabled = document.getElementById('toggle-sync').checked;
+            state.settings.syncUrl = document.getElementById('input-sync-url').value.trim();
+            saveData();
+            alert("Configuración guardada");
+        }
+
+        function clearAllData() {
+            if (confirm("¿Estás seguro de borrar todo el historial? Esto no se puede deshacer.")) {
+                state.sessions = [];
+                state.customActivities = { cardio: [], fuerza: [], elongacion: [], fisio: [] };
+                saveData();
+                closeAllModals();
+            }
+        }
+
+        function exportCSV() {
+            if (state.sessions.length === 0) {
+                alert("No hay datos para exportar.");
+                return;
+            }
+            
+            let csvContent = "data:text/csv;charset=utf-8,ID,Fecha,Timestamp,Categoria,Zona,Actividad,Duracion_min,Notas\n";
+            
+            state.sessions.forEach(s => {
+                const dateStr = new Date(s.timestamp).toLocaleDateString();
+                const notesEscaped = s.notes ? `"${s.notes.replace(/"/g, '""')}"` : "";
+                csvContent += `${s.id},${dateStr},${s.timestamp},${s.category},${s.zone},${s.activity},${s.duration},${notesEscaped}\n`;
+            });
+
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `rehab_backup_${new Date().toISOString().split('T')[0]}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function importCSV(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                const lines = text.split('\n');
+                
+                let imported = 0;
+                // Empezamos desde 1 para saltar el header
+                for(let i = 1; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    if (!line) continue;
+                    
+                    // Simple parseo de CSV (asume que las comas en las notas están entre comillas)
+                    // Para un CSV simple sin casos borde extremos de saltos de línea internos:
+                    const regex = /(".*?"|[^",\s]+)(?=\s*,|\s*$)/g;
+                    let matches = [];
+                    let match;
+                    while ((match = regex.exec(line)) !== null) {
+                        matches.push(match[1].replace(/(^"|"$)/g, '').replace(/""/g, '"'));
+                    }
+                    
+                    if (matches.length >= 7) {
+                        // Verificamos que no exista el ID
+                        const exists = state.sessions.find(s => s.id === matches[0]);
+                        if (!exists) {
+                            state.sessions.push({
+                                id: matches[0],
+                                timestamp: parseInt(matches[2]),
+                                category: matches[3],
+                                zone: matches[4],
+                                activity: matches[5],
+                                duration: parseInt(matches[6]),
+                                notes: matches[7] || ""
+                            });
+                            imported++;
+                        }
+                    }
+                }
+                saveData();
+                alert(`Importación exitosa: ${imported} sesiones nuevas agregadas.`);
+                closeAllModals();
+            };
+            reader.readAsText(file);
+        }
+
+        // Arrancar la app
+        window.onload = init;
+
+    </script>
+</body>
+</html>
