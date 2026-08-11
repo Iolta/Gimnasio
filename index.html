@@ -83,18 +83,28 @@
         /* Registro y Listas */
         .section-title { font-size: 16px; margin-bottom: 15px; margin-top: 20px; }
         .log-list { display: flex; flex-direction: column; gap: 10px; }
+        .session-block {
+            background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--border-radius);
+            padding: 12px; margin-bottom: 15px;
+        }
+        .session-block-header {
+            font-size: 13px; color: var(--text-sec); border-bottom: 1px dashed var(--border-color);
+            padding-bottom: 8px; margin-bottom: 10px; display: flex; justify-content: space-between;
+        }
         .log-item { 
-            background: var(--card-bg); padding: 15px; border-radius: var(--border-radius); 
+            background: var(--bg-color); padding: 12px; border-radius: var(--border-radius); 
             display: flex; justify-content: space-between; align-items: center; 
             border-left: 4px solid var(--text-sec);
             border-top: 1px solid var(--border-color);
             border-right: 1px solid var(--border-color);
             border-bottom: 1px solid var(--border-color);
+            margin-bottom: 8px;
         }
+        .log-item:last-child { margin-bottom: 0; }
         .log-details h4 { font-size: 15px; margin-bottom: 4px; color: var(--text-main); font-weight: bold; }
         .log-details h4::before { display: none; }
         .log-details p { font-size: 13px; }
-        .log-time { font-weight: bold; font-size: 14px; background: var(--bg-color); padding: 4px 8px; border: 1px solid var(--border-color); }
+        .log-time { font-weight: bold; font-size: 14px; background: var(--card-bg); padding: 4px 8px; border: 1px solid var(--border-color); }
 
         /* Resumen */
         .stat-card { background: var(--card-bg); border: 1px solid var(--border-color); padding: 20px; margin-bottom: 20px; }
@@ -346,10 +356,10 @@
         };
 
         let state = {
-            sessions: [],
+            sessions: [], // Array de bloques de sesiones diarias completas
             customActivities: { cardio: [], fuerza: [], elongacion: [], fisio: [] },
             settings: { syncEnabled: false, syncUrl: '' },
-            activeSessionStart: null // <-- Nuevo estado para controlar la sesión activa
+            activeSession: null // { start: timestamp, exercises: [...] }
         };
 
         let currentActiveCategory = null;
@@ -409,9 +419,13 @@
                 if (countdownSeconds <= 0) {
                     clearInterval(countdownInterval);
                     document.getElementById('sw-time').innerText = '00:00';
-                    playAlarm();
-                    alert("¡Tiempo de la actividad cumplido!");
                     cancelCountdown();
+                    // 1. Suena la alarma primero de forma inmediata
+                    playAlarm();
+                    // 2. Luego se muestra el aviso visual para que el usuario acepte después
+                    setTimeout(() => {
+                        alert("¡Tiempo de la actividad cumplido!");
+                    }, 100);
                     return;
                 }
                 document.getElementById('sw-time').innerText = formatTime(countdownSeconds);
@@ -423,22 +437,29 @@
             document.getElementById('countdown-container').style.display = 'none';
         }
 
-        /* --- CÁLCULO Y CIERRE DE SESIÓN DIARIA GLOBAL --- */
+        /* --- CIERRE DE SESIÓN DIARIA --- */
         function endDailySession() {
-            if (!state.activeSessionStart) return;
+            if (!state.activeSession || state.activeSession.exercises.length === 0) return;
 
-            const diffMs = Date.now() - state.activeSessionStart;
+            const endTime = Date.now();
+            const diffMs = endTime - state.activeSession.start;
             const minsTotal = Math.floor(diffMs / 60000);
             const hrs = Math.floor(minsTotal / 60);
             const remainMins = minsTotal % 60;
-            
-            const timeStr = hrs > 0 ? `${hrs}h ${remainMins}m` : `${remainMins} min`;
-            
-            alert(`¡Entrenamiento completado!\n\nTiempo total de esta sesión:\n> ${timeStr}`);
-            
-            // Cerramos la sesión
-            state.activeSessionStart = null;
+            const durationStr = hrs > 0 ? `${hrs}h ${remainMins}m` : `${minsTotal} min`;
+
+            const completedBlock = {
+                id: Date.now().toString(),
+                start: state.activeSession.start,
+                end: endTime,
+                durationStr: durationStr,
+                exercises: [...state.activeSession.exercises]
+            };
+
+            state.sessions.push(completedBlock);
+            state.activeSession = null;
             saveData();
+            alert(`¡Sesión cerrada con éxito!\nTiempo total: ${durationStr}`);
         }
 
 
@@ -467,7 +488,13 @@
             if (savedState) {
                 state = JSON.parse(savedState);
                 if(!state.settings) state.settings = { syncEnabled: false, syncUrl: '' };
-                if(state.activeSessionStart === undefined) state.activeSessionStart = null;
+                if(!state.sessions) state.sessions = [];
+                // Compatibilidad con formato anterior si existía
+                if(state.activeSessionStart) {
+                    state.activeSession = { start: state.activeSessionStart, exercises: [...state.sessions] };
+                    state.sessions = [];
+                    delete state.activeSessionStart;
+                }
             }
         }
 
@@ -512,47 +539,103 @@
             const sessionPanel = document.getElementById('session-panel');
             const sessionInfo = document.getElementById('session-info');
             const today = new Date().toLocaleDateString();
-            
-            // Validar si la sesión activa es de un día anterior (limpieza automática)
-            if (state.activeSessionStart) {
-                if (new Date(state.activeSessionStart).toLocaleDateString() !== today) {
-                    state.activeSessionStart = null;
-                }
+
+            // Validar si la sesión activa es de un día anterior
+            if (state.activeSession && new Date(state.activeSession.start).toLocaleDateString() !== today) {
+                // Si quedó abierta de ayer, la cerramos automáticamente
+                const lastEx = state.activeSession.exercises[state.activeSession.exercises.length - 1];
+                const endTime = lastEx ? lastEx.timestamp : state.activeSession.start;
+                const diffMs = endTime - state.activeSession.start;
+                const mins = Math.floor(diffMs / 60000);
+                state.sessions.push({
+                    id: Date.now().toString(),
+                    start: state.activeSession.start,
+                    end: endTime,
+                    durationStr: `${mins} min`,
+                    exercises: [...state.activeSession.exercises]
+                });
+                state.activeSession = null;
             }
 
-            const todaySessions = state.sessions.filter(s => new Date(s.timestamp).toLocaleDateString() === today);
-            
-            // Renderizar la lista
-            if (todaySessions.length === 0) {
-                container.innerHTML = '<p style="text-align:center; padding: 20px;">> No hay registros hoy.</p>';
-            } else {
-                todaySessions.sort((a, b) => b.timestamp - a.timestamp);
-                container.innerHTML = todaySessions.map(getLogHtml).join('');
+            // Filtrar bloques cerrados de hoy
+            const todayClosedBlocks = state.sessions.filter(b => new Date(b.start).toLocaleDateString() === today);
+
+            let htmlContent = '';
+
+            // Renderizar bloques ya cerrados de hoy
+            if (todayClosedBlocks.length > 0) {
+                todayClosedBlocks.sort((a, b) => b.start - a.start).forEach(block => {
+                    const startStr = new Date(block.start).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                    const endStr = new Date(block.end).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                    htmlContent += `
+                        <div class="session-block">
+                            <div class="session-block-header">
+                                <span># Sesión [${startStr} - ${endStr}]</span>
+                                <span>Duración: ${block.durationStr}</span>
+                            </div>
+                            <div class="log-list">
+                                ${block.exercises.map(getLogHtml).join('')}
+                            </div>
+                        </div>
+                    `;
+                });
             }
 
-            // Mostrar el panel SOLO si hay una sesión activa en el state
-            if (state.activeSessionStart) {
-                const startTime = new Date(state.activeSessionStart).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                sessionInfo.innerText = `> Sesión Activa desde las: ${startTime}`;
+            // Renderizar bloque activo actual si existe
+            if (state.activeSession && state.activeSession.exercises.length > 0) {
+                const startTime = new Date(state.activeSession.start).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                sessionInfo.innerText = `> Sesión Activa (Iniciada a las ${startTime})`;
                 sessionPanel.style.display = 'block';
+
+                htmlContent += `
+                    <div class="session-block" style="border-color: var(--accent);">
+                        <div class="session-block-header" style="color: var(--accent);">
+                            <span># Sesión Activa [Inicio: ${startTime}]</span>
+                            <span>En curso...</span>
+                        </div>
+                        <div class="log-list">
+                            ${state.activeSession.exercises.slice().reverse().map(getLogHtml).join('')}
+                        </div>
+                    </div>
+                `;
             } else {
                 sessionPanel.style.display = 'none';
+            }
+
+            if (!htmlContent) {
+                container.innerHTML = '<p style="text-align:center; padding: 20px;">> No hay registros hoy.</p>';
+            } else {
+                container.innerHTML = htmlContent;
             }
         }
 
         function renderHistory() {
             const container = document.getElementById('historial-container');
-            if (state.sessions.length === 0) {
+            const allBlocks = [...state.sessions];
+
+            // Si hay una sesión activa, también la mostramos en el historial general
+            if (state.activeSession && state.activeSession.exercises.length > 0) {
+                allBlocks.push({
+                    id: 'active',
+                    start: state.activeSession.start,
+                    end: Date.now(),
+                    durationStr: 'En curso',
+                    exercises: state.activeSession.exercises
+                });
+            }
+
+            if (allBlocks.length === 0) {
                 container.innerHTML = '<p>> El historial está vacío.</p>';
                 return;
             }
 
-            const grouped = state.sessions.reduce((acc, session) => {
-                const date = new Date(session.timestamp).toLocaleDateString();
-                if (!acc[date]) acc[date] = [];
-                acc[date].push(session);
-                return acc;
-            }, {});
+            // Agrupar por fecha
+            const grouped = {};
+            allBlocks.forEach(block => {
+                const date = new Date(block.start).toLocaleDateString();
+                if (!grouped[date]) grouped[date] = [];
+                grouped[date].push(block);
+            });
 
             let html = '';
             const sortedDates = Object.keys(grouped).sort((a, b) => {
@@ -562,44 +645,65 @@
 
             for (let date of sortedDates) {
                 html += `<div style="margin-bottom: 25px;">
-                            <div style="font-weight: bold; margin-bottom: 10px; color: var(--text-sec)"># ${date}</div>
-                            <div class="log-list">
-                                ${grouped[date].sort((a, b) => b.timestamp - a.timestamp).map(getLogHtml).join('')}
+                            <div style="font-weight: bold; margin-bottom: 10px; color: var(--text-sec)">## ${date}</div>`;
+                
+                grouped[date].sort((a, b) => b.start - a.start).forEach(block => {
+                    const startStr = new Date(block.start).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                    const endStr = block.id === 'active' ? 'En curso' : new Date(block.end).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                    
+                    html += `
+                        <div class="session-block">
+                            <div class="session-block-header">
+                                <span>[${startStr} - ${endStr}]</span>
+                                <span>Duración: ${block.durationStr}</span>
                             </div>
-                         </div>`;
+                            <div class="log-list">
+                                ${block.exercises.slice().reverse().map(getLogHtml).join('')}
+                            </div>
+                        </div>
+                    `;
+                });
+                html += `</div>`;
             }
             container.innerHTML = html;
         }
 
         function renderSummary() {
             let totalMins = 0;
+            let totalSessionsCount = 0;
             const catCounts = { cardio: 0, fuerza: 0, elongacion: 0, fisio: 0 };
             
-            state.sessions.forEach(s => {
-                catCounts[s.category]++;
-                let m = s.metric || (s.duration + " min");
-                if (m.includes('min')) {
-                    totalMins += parseInt(m);
-                }
+            const allBlocks = [...state.sessions];
+            if (state.activeSession) allBlocks.push(state.activeSession);
+
+            allBlocks.forEach(block => {
+                totalSessionsCount += block.exercises.length;
+                block.exercises.forEach(s => {
+                    catCounts[s.category]++;
+                    let m = s.metric || (s.duration + " min");
+                    if (m.includes('min')) {
+                        totalMins += parseInt(m);
+                    }
+                });
             });
 
             document.getElementById('stat-total-time').innerText = totalMins > 60 
                 ? `${Math.floor(totalMins/60)}h ${totalMins%60}m` 
                 : `${totalMins} min`;
-            document.getElementById('stat-total-sessions').innerText = `> ${state.sessions.length} sesiones completadas`;
+            document.getElementById('stat-total-sessions').innerText = `> ${totalSessionsCount} ejercicios completados`;
 
             const progContainer = document.getElementById('progress-container');
             progContainer.innerHTML = '';
             
             for (let [id, cat] of Object.entries(CATEGORIES)) {
                 const count = catCounts[id];
-                const pct = state.sessions.length === 0 ? 0 : Math.round((count / state.sessions.length) * 100);
+                const pct = totalSessionsCount === 0 ? 0 : Math.round((count / totalSessionsCount) * 100);
                 
                 progContainer.innerHTML += `
                     <div class="progress-bar-container">
                         <div class="progress-info">
                             <span style="filter:grayscale(100%)">${cat.emoji} ${cat.name}</span>
-                            <span>${pct}% (${count} ses.)</span>
+                            <span>${pct}% (${count} ej.)</span>
                         </div>
                         <div class="progress-track">
                             <div class="progress-fill" style="width: ${pct}%;"></div>
@@ -748,18 +852,15 @@
                 notes: notes
             };
 
-            // Iniciar o mantener la sesión activa global
-            if (state.activeSessionStart) {
-                // Verificar si quedó colgada del día anterior
-                const activeStart = new Date(state.activeSessionStart);
-                if (activeStart.toLocaleDateString() !== new Date().toLocaleDateString()) {
-                    state.activeSessionStart = newSession.timestamp;
-                }
-            } else {
-                state.activeSessionStart = newSession.timestamp;
+            // Gestionar la sesión activa
+            if (!state.activeSession) {
+                state.activeSession = {
+                    start: newSession.timestamp,
+                    exercises: []
+                };
             }
+            state.activeSession.exercises.push(newSession);
 
-            state.sessions.push(newSession);
             saveData();
             
             if (state.settings.syncEnabled && state.settings.syncUrl) {
@@ -803,22 +904,30 @@
             if (confirm("¿Seguro que quieres borrar todo el historial?")) {
                 state.sessions = [];
                 state.customActivities = { cardio: [], fuerza: [], elongacion: [], fisio: [] };
-                state.activeSessionStart = null;
+                state.activeSession = null;
                 saveData();
                 closeAllModals();
             }
         }
 
         function exportCSV() {
-            if (state.sessions.length === 0) { alert("No hay datos."); return; }
+            const allBlocks = [...state.sessions];
+            if (state.activeSession) allBlocks.push(state.activeSession);
+
+            if (allBlocks.length === 0) { alert("No hay datos."); return; }
             
-            let csvContent = "data:text/csv;charset=utf-8,ID,Fecha,Timestamp,Categoria,Zona,Actividad,Metrica,Notas\n";
+            let csvContent = "data:text/csv;charset=utf-8,ID,FechaSesion,InicioSesion,FinSesion,DuracionSesion,Categoria,Zona,Actividad,Metrica,Notas\n";
             
-            state.sessions.forEach(s => {
-                const dateStr = new Date(s.timestamp).toLocaleDateString();
-                const notesEscaped = s.notes ? `"${s.notes.replace(/"/g, '""')}"` : "";
-                const met = s.metric || (s.duration + " min");
-                csvContent += `${s.id},${dateStr},${s.timestamp},${s.category},${s.zone},${s.activity},${met},${notesEscaped}\n`;
+            allBlocks.forEach(b => {
+                const dateStr = new Date(b.start).toLocaleDateString();
+                const startStr = new Date(b.start).toLocaleTimeString();
+                const endStr = b.id === 'active' ? 'En curso' : new Date(b.end).toLocaleTimeString();
+                
+                b.exercises.forEach(s => {
+                    const notesEscaped = s.notes ? `"${s.notes.replace(/"/g, '""')}"` : "";
+                    const met = s.metric || (s.duration + " min");
+                    csvContent += `${s.id},${dateStr},${startStr},${endStr},${b.durationStr},${s.category},${s.zone},${s.activity},${met},${notesEscaped}\n`;
+                });
             });
 
             const encodedUri = encodeURI(csvContent);
@@ -838,6 +947,10 @@
             reader.onload = function(e) {
                 const lines = e.target.result.split('\n');
                 let imported = 0;
+                
+                // Mapeo temporal para agrupar ejercicios importados por su sesión (usando la hora de inicio como clave)
+                const tempSessions = {};
+
                 for(let i = 1; i < lines.length; i++) {
                     const line = lines[i].trim();
                     if (!line) continue;
@@ -849,23 +962,54 @@
                         matches.push(match[1].replace(/(^"|"$)/g, '').replace(/""/g, '"'));
                     }
                     
-                    if (matches.length >= 7) {
-                        if (!state.sessions.find(s => s.id === matches[0])) {
-                            state.sessions.push({
-                                id: matches[0],
-                                timestamp: parseInt(matches[2]),
-                                category: matches[3],
-                                zone: matches[4],
-                                activity: matches[5],
-                                metric: matches[6], 
-                                notes: matches[7] || ""
-                            });
-                            imported++;
+                    if (matches.length >= 9) {
+                        const id = matches[0];
+                        const dateStr = matches[1];
+                        const startStr = matches[2];
+                        const endStr = matches[3];
+                        const durationStr = matches[4];
+                        const category = matches[5];
+                        const zone = matches[6];
+                        const activity = matches[7];
+                        const metric = matches[8];
+                        const notes = matches[9] || "";
+
+                        // Reconstruir timestamp aproximado de inicio
+                        const startTimestamp = new Date(`${dateStr} ${startStr}`).getTime() || Date.now();
+                        const endTimestamp = new Date(`${dateStr} ${endStr}`).getTime() || startTimestamp;
+
+                        const sessionObj = {
+                            id: id,
+                            timestamp: startTimestamp,
+                            category: category,
+                            zone: zone,
+                            activity: activity,
+                            metric: metric,
+                            notes: notes
+                        };
+
+                        const blockKey = `${dateStr}_${startStr}`;
+                        if (!tempSessions[blockKey]) {
+                            tempSessions[blockKey] = {
+                                id: startTimestamp.toString(),
+                                start: startTimestamp,
+                                end: endTimestamp,
+                                durationStr: durationStr,
+                                exercises: []
+                            };
                         }
+                        tempSessions[blockKey].exercises.push(sessionObj);
+                        imported++;
                     }
                 }
+
+                // Volcar al estado
+                for(let key in tempSessions) {
+                    state.sessions.push(tempSessions[key]);
+                }
+
                 saveData();
-                alert(`Importados ${imported} registros.`);
+                alert(`Importados ${imported} registros con éxito.`);
                 closeAllModals();
             };
             reader.readAsText(file);
