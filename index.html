@@ -15,14 +15,13 @@
             --border-color: #30363d;
             --accent: #ffffff;
             
-            --border-radius: 4px; /* Bordes mucho más rectos */
+            --border-radius: 4px;
             --nav-height: 70px;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-tap-highlight-color: transparent; }
         
         body {
-            /* Fuente monoespaciada para estética Markdown */
             font-family: "Courier New", Courier, monospace, system-ui;
             background-color: var(--bg-color);
             color: var(--text-main);
@@ -93,7 +92,7 @@
             border-bottom: 1px solid var(--border-color);
         }
         .log-details h4 { font-size: 15px; margin-bottom: 4px; color: var(--text-main); font-weight: bold; }
-        .log-details h4::before { display: none; } /* Quitamos el ## de los items */
+        .log-details h4::before { display: none; }
         .log-details p { font-size: 13px; }
         .log-time { font-weight: bold; font-size: 14px; background: var(--bg-color); padding: 4px 8px; border: 1px solid var(--border-color); }
 
@@ -131,7 +130,7 @@
         .pill.active { background: var(--text-sec); color: var(--bg-color); font-weight: bold; }
         
         .input-row { display: flex; gap: 10px; margin-top: 10px; align-items: center; }
-        input[type="text"], input[type="number"], textarea {
+        input[type="text"], input[type="number"], textarea, select {
             flex: 1; background: var(--bg-color); border: 1px solid var(--border-color);
             color: var(--text-main); padding: 10px; font-size: 14px; font-family: inherit;
         }
@@ -177,11 +176,11 @@
 
     <!-- VISTA: HOY -->
     <main id="view-hoy" class="view active">
-        <!-- Cronómetro pasivo -->
+        <!-- Cronómetro y Temporizador -->
         <div class="stopwatch-container">
             <div class="stopwatch-circle" id="stopwatch" onclick="toggleStopwatch()">
                 <div id="sw-time">00:00</div>
-                <div style="font-size: 12px; color: var(--text-sec); margin-top: 5px;" id="sw-label">&gt; Tocar para iniciar</div>
+                <div style="font-size: 12px; color: var(--text-sec); margin-top: 5px;" id="sw-label">&gt; Tocar para iniciar libre</div>
             </div>
             <div class="stopwatch-controls">
                 <button class="btn-stop" id="btn-sw-stop" onclick="stopAndLogStopwatch()">[ Guardar ]</button>
@@ -268,7 +267,7 @@
             </div>
         </div>
 
-        <!-- Opciones de Series/Reps (Para Fuerza) -->
+        <!-- Opciones de Series/Reps/Peso (Para Fuerza) -->
         <div class="form-group" id="group-reps" style="display:none;">
             <label>> Series x Repeticiones</label>
             <div class="pills-container" id="pills-reps">
@@ -283,14 +282,23 @@
                 <span style="color:var(--text-sec); font-weight:bold;">x</span>
                 <input type="number" id="input-reps" placeholder="Reps" style="width: 40%">
             </div>
+            <div class="input-row" style="margin-top:15px;">
+                <label style="color:var(--text-main); font-weight:bold; margin-right:10px;">> Peso:</label>
+                <select id="input-weight" style="flex:1;">
+                    <option value="">Sin peso extra</option>
+                    <!-- Inyectado por JS -->
+                </select>
+            </div>
         </div>
 
         <div class="form-group">
             <label>> Notas adicionales</label>
-            <textarea id="input-notes" placeholder="Pesos, tolerancia al dolor..."></textarea>
+            <textarea id="input-notes" placeholder="Pesos detallados, tolerancia al dolor..."></textarea>
         </div>
 
-        <button class="btn-submit" onclick="saveSession()">> Guardar Sesión</button>
+        <!-- Botones Dinámicos -->
+        <button class="btn-submit" id="btn-save-timer" style="display:none; background: var(--card-bg); border: 1px dashed var(--text-sec); margin-bottom: 10px; color: var(--text-main);" onclick="saveSession(true)">> Guardar e Iniciar Alarma</button>
+        <button class="btn-submit" onclick="saveSession(false)">> Guardar Sesión</button>
     </div>
 
     <!-- MODAL: CONFIGURACIÓN -->
@@ -339,10 +347,44 @@
 
         let currentActiveCategory = null;
 
-        /* --- CRONÓMETRO --- */
+        /* --- SINTETIZADOR DE ALARMA NATIVO (API WEB AUDIO) --- */
+        let audioCtx = null;
+        
+        function initAudio() {
+            if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+            if (audioCtx.state === 'suspended') { audioCtx.resume(); }
+        }
+
+        function playAlarm() {
+            try {
+                if (!audioCtx) initAudio();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.type = 'square';
+                
+                const now = audioCtx.currentTime;
+                // Secuencia de pitidos urgentes tipo cronómetro
+                osc.frequency.setValueAtTime(600, now);
+                osc.frequency.setValueAtTime(800, now + 0.2);
+                osc.frequency.setValueAtTime(600, now + 0.4);
+                osc.frequency.setValueAtTime(800, now + 0.6);
+                osc.frequency.setValueAtTime(600, now + 0.8);
+                osc.frequency.setValueAtTime(800, now + 1.0);
+                
+                gain.gain.setValueAtTime(0.1, now);
+                osc.start(now);
+                osc.stop(now + 1.2);
+            } catch(e) { console.log("Audio no soportado"); }
+        }
+
+
+        /* --- CRONÓMETRO / TEMPORIZADOR --- */
         let swInterval;
         let swSeconds = 0;
         let swIsRunning = false;
+        let swIsCountdown = false;
 
         function formatTime(sec) {
             const m = Math.floor(sec / 60).toString().padStart(2, '0');
@@ -350,7 +392,18 @@
             return `${m}:${s}`;
         }
 
+        function startCountdown(seconds) {
+            initAudio(); // Desbloquea el audio mientras ocurre el "click" del usuario
+            resetStopwatch();
+            swIsCountdown = true;
+            swSeconds = seconds;
+            document.getElementById('sw-time').innerText = formatTime(swSeconds);
+            switchTab('hoy');
+            toggleStopwatch(); // Auto arranca
+        }
+
         function toggleStopwatch() {
+            initAudio();
             const circle = document.getElementById('stopwatch');
             const label = document.getElementById('sw-label');
             const btnStop = document.getElementById('btn-sw-stop');
@@ -364,25 +417,43 @@
             } else {
                 swIsRunning = true;
                 circle.classList.add('running');
-                label.innerText = '> Corriendo...';
+                label.innerText = swIsCountdown ? '> Cuenta regresiva...' : '> Corriendo libre...';
                 btnStop.style.display = 'block';
                 btnReset.style.display = 'block';
+                btnStop.innerText = swIsCountdown ? '[ Finalizar ]' : '[ Guardar ]';
                 
                 swInterval = setInterval(() => {
-                    swSeconds++;
+                    if (swIsCountdown) {
+                        swSeconds--;
+                        if (swSeconds <= 0) {
+                            clearInterval(swInterval);
+                            document.getElementById('sw-time').innerText = '00:00';
+                            playAlarm();
+                            alert("¡Tiempo de la actividad cumplido!");
+                            resetStopwatch();
+                            return;
+                        }
+                    } else {
+                        swSeconds++;
+                    }
                     document.getElementById('sw-time').innerText = formatTime(swSeconds);
                 }, 1000);
             }
         }
 
         function stopAndLogStopwatch() {
+            if (swIsCountdown) {
+                // Si era regresivo, ya se guardó al iniciar. Solo lo limpiamos.
+                resetStopwatch();
+                return;
+            }
+            // Si era cronómetro pasivo (hacia arriba)
             if (swSeconds < 60) {
                 alert("El tiempo es menor a 1 minuto.");
                 return;
             }
             clearInterval(swInterval);
             swIsRunning = false;
-            
             let mins = Math.floor(swSeconds / 60);
             resetStopwatch();
             
@@ -393,9 +464,10 @@
         function resetStopwatch() {
             clearInterval(swInterval);
             swIsRunning = false;
+            swIsCountdown = false;
             swSeconds = 0;
             document.getElementById('sw-time').innerText = '00:00';
-            document.getElementById('sw-label').innerText = '> Tocar para iniciar';
+            document.getElementById('sw-label').innerText = '> Tocar para iniciar libre';
             document.getElementById('stopwatch').classList.remove('running');
             document.getElementById('btn-sw-stop').style.display = 'none';
             document.getElementById('btn-sw-reset').style.display = 'none';
@@ -404,6 +476,14 @@
         /* --- INICIALIZACIÓN --- */
         function init() {
             loadData();
+            
+            // Llenar selector de pesos dinámicamente
+            const wSelect = document.getElementById('input-weight');
+            [2, 5].forEach(w => wSelect.add(new Option(w + ' kg', w)));
+            for(let w=10; w<=100; w+=5) {
+                wSelect.add(new Option(w + ' kg', w));
+            }
+
             renderCategoryGrid();
             renderTodayLog();
             renderHistory();
@@ -445,8 +525,6 @@
 
         function getLogHtml(session) {
             const cat = CATEGORIES[session.category];
-            const dateStr = new Date(session.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-            // Soporte para datos viejos (duration) y nuevos (metric)
             const metricDisplay = session.metric ? session.metric : (session.duration + ' min');
             
             return `
@@ -511,7 +589,6 @@
             
             state.sessions.forEach(s => {
                 catCounts[s.category]++;
-                // Sumar tiempo solo si es una métrica de tiempo (minutos)
                 let m = s.metric || (s.duration + " min");
                 if (m.includes('min')) {
                     totalMins += parseInt(m);
@@ -576,22 +653,24 @@
             document.getElementById('input-duration').value = '';
             document.getElementById('input-sets').value = '';
             document.getElementById('input-reps').value = '';
+            document.getElementById('input-weight').value = '';
             document.getElementById('input-notes').value = '';
 
             // Render Pills
             renderPills('pills-zone', cat.defZones);
             const allActivities = cat.defActs.concat(state.customActivities[categoryId]);
             renderPills('pills-activity', allActivities);
-            
             document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
 
-            // Alternar vista de Tiempo vs Fuerza (Series/Reps)
+            // Alternar vista
             if (categoryId === 'fuerza') {
                 document.getElementById('group-duration').style.display = 'none';
                 document.getElementById('group-reps').style.display = 'block';
+                document.getElementById('btn-save-timer').style.display = 'none';
             } else {
                 document.getElementById('group-duration').style.display = 'block';
                 document.getElementById('group-reps').style.display = 'none';
+                document.getElementById('btn-save-timer').style.display = 'block';
             }
 
             showModal('modal-session');
@@ -634,7 +713,7 @@
             }
         }
 
-        function saveSession() {
+        function saveSession(startTimer = false) {
             const activeZone = document.querySelector('#pills-zone .pill.active');
             const activeAct = document.querySelector('#pills-activity .pill.active');
             
@@ -643,12 +722,13 @@
             const notes = document.getElementById('input-notes').value.trim();
 
             let metric = '';
+            let timerMinutes = 0;
 
-            // Lógica dependiendo si es Fuerza o el resto
             if (currentActiveCategory === 'fuerza') {
                 const activeRep = document.querySelector('#pills-reps .pill.active');
                 const iSets = document.getElementById('input-sets').value;
                 const iReps = document.getElementById('input-reps').value;
+                const iWeight = document.getElementById('input-weight').value;
                 
                 if (iSets && iReps) {
                     metric = `${iSets}x${iReps}`;
@@ -657,6 +737,9 @@
                 }
                 
                 if (!metric) { alert("Ingresa series y repeticiones"); return; }
+                if (iWeight) {
+                    metric += ` @ ${iWeight}kg`;
+                }
             } else {
                 const activeDur = document.querySelector('#pills-duration .pill.active');
                 const inputDur = document.getElementById('input-duration').value;
@@ -664,6 +747,7 @@
                 
                 if (!dur || dur <= 0) { alert("Ingresa el tiempo en minutos"); return; }
                 metric = `${dur} min`;
+                timerMinutes = dur;
             }
 
             const newSession = {
@@ -683,6 +767,10 @@
                 syncToCloud(newSession);
             }
             closeAllModals();
+
+            if (startTimer && timerMinutes > 0) {
+                startCountdown(timerMinutes * 60);
+            }
         }
 
         /* --- CLOUD SYNC --- */
@@ -693,8 +781,8 @@
                     mode: 'no-cors',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
-                }).catch(e => console.error("Sync falló:", e));
-            } catch (err) { console.error("Error al disparar sync", err); }
+                }).catch(e => console.log("Sync falló", e));
+            } catch (err) { console.log(err); }
         }
 
         /* --- CONFIGURACIÓN Y BACKUPS --- */
