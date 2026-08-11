@@ -57,18 +57,18 @@
         .view.active { display: block; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-        /* Cronómetro (Hoy) */
+        /* Cronómetro (Alarma Regresiva) */
         .stopwatch-container {
-            display: flex; flex-direction: column; align-items: center; margin-bottom: 30px;
-            padding: 20px; border: 1px dashed var(--border-color);
+            display: flex; flex-direction: column; align-items: center; margin-bottom: 25px;
+            padding: 20px; border: 1px dashed var(--text-sec); background: var(--bg-color);
         }
         .stopwatch-circle {
             font-size: 42px; font-variant-numeric: tabular-nums;
-            cursor: pointer; color: var(--text-main); text-align: center;
+            color: var(--text-main); text-align: center;
         }
         .stopwatch-circle.running { color: var(--accent); font-weight: bold; }
         .stopwatch-controls { margin-top: 15px; display: flex; gap: 10px; }
-        .btn-stop { background: var(--card-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 8px 16px; font-family: inherit; display: none; }
+        .btn-stop { background: var(--card-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 8px 16px; font-family: inherit; }
 
         /* Grilla Categorías */
         .categories-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 30px; }
@@ -161,7 +161,7 @@
         /* Settings Extras */
         .switch-container { display: flex; justify-content: space-between; align-items: center; padding: 15px; border: 1px solid var(--border-color); margin-bottom: 15px; }
         .btn-danger { background: transparent; border: 1px solid #ff4444; color: #ff4444; width: 100%; padding: 15px; margin-top: 20px; font-family: inherit; }
-        .btn-outline { background: transparent; border: 1px solid var(--border-color); color: var(--text-main); width: 100%; padding: 15px; margin-top: 10px; font-family: inherit; }
+        .btn-outline { background: transparent; border: 1px solid var(--border-color); color: var(--text-main); width: 100%; padding: 15px; margin-top: 10px; font-family: inherit; cursor: pointer; }
 
     </style>
 </head>
@@ -176,15 +176,21 @@
 
     <!-- VISTA: HOY -->
     <main id="view-hoy" class="view active">
-        <!-- Cronómetro y Temporizador -->
-        <div class="stopwatch-container">
-            <div class="stopwatch-circle" id="stopwatch" onclick="toggleStopwatch()">
+        
+        <!-- Panel de Sesión Diaria (Dinámico) -->
+        <div id="session-panel" style="display: none; margin-bottom: 25px; padding: 15px; border: 1px solid var(--border-color); background: var(--card-bg); text-align: center;">
+            <div style="color: var(--text-sec); margin-bottom: 10px; font-size: 14px; font-weight: bold;" id="session-info"></div>
+            <button class="btn-outline" style="margin-top: 0; padding: 10px;" onclick="endDailySession()">[ Fin de la sesión diaria ]</button>
+        </div>
+
+        <!-- Temporizador de Alarma (Oculto por defecto) -->
+        <div class="stopwatch-container" id="countdown-container" style="display: none;">
+            <div style="color: var(--text-main); font-size: 14px; margin-bottom: 10px;">> Alarma Activa</div>
+            <div class="stopwatch-circle running" id="countdown-circle">
                 <div id="sw-time">00:00</div>
-                <div style="font-size: 12px; color: var(--text-sec); margin-top: 5px;" id="sw-label">&gt; Tocar para iniciar libre</div>
             </div>
             <div class="stopwatch-controls">
-                <button class="btn-stop" id="btn-sw-stop" onclick="stopAndLogStopwatch()">[ Guardar ]</button>
-                <button class="btn-stop" id="btn-sw-reset" onclick="resetStopwatch()">[ Descartar ]</button>
+                <button class="btn-stop" style="display:block;" onclick="cancelCountdown()">[ Cancelar ]</button>
             </div>
         </div>
 
@@ -380,11 +386,9 @@
         }
 
 
-        /* --- CRONÓMETRO / TEMPORIZADOR --- */
-        let swInterval;
-        let swSeconds = 0;
-        let swIsRunning = false;
-        let swIsCountdown = false;
+        /* --- TEMPORIZADOR DE CUENTA REGRESIVA --- */
+        let countdownInterval;
+        let countdownSeconds = 0;
 
         function formatTime(sec) {
             const m = Math.floor(sec / 60).toString().padStart(2, '0');
@@ -394,84 +398,51 @@
 
         function startCountdown(seconds) {
             initAudio(); // Desbloquea el audio mientras ocurre el "click" del usuario
-            resetStopwatch();
-            swIsCountdown = true;
-            swSeconds = seconds;
-            document.getElementById('sw-time').innerText = formatTime(swSeconds);
+            document.getElementById('countdown-container').style.display = 'flex';
+            countdownSeconds = seconds;
+            document.getElementById('sw-time').innerText = formatTime(countdownSeconds);
             switchTab('hoy');
-            toggleStopwatch(); // Auto arranca
-        }
-
-        function toggleStopwatch() {
-            initAudio();
-            const circle = document.getElementById('stopwatch');
-            const label = document.getElementById('sw-label');
-            const btnStop = document.getElementById('btn-sw-stop');
-            const btnReset = document.getElementById('btn-sw-reset');
-
-            if (swIsRunning) {
-                clearInterval(swInterval);
-                swIsRunning = false;
-                circle.classList.remove('running');
-                label.innerText = '> Pausado';
-            } else {
-                swIsRunning = true;
-                circle.classList.add('running');
-                label.innerText = swIsCountdown ? '> Cuenta regresiva...' : '> Corriendo libre...';
-                btnStop.style.display = 'block';
-                btnReset.style.display = 'block';
-                btnStop.innerText = swIsCountdown ? '[ Finalizar ]' : '[ Guardar ]';
-                
-                swInterval = setInterval(() => {
-                    if (swIsCountdown) {
-                        swSeconds--;
-                        if (swSeconds <= 0) {
-                            clearInterval(swInterval);
-                            document.getElementById('sw-time').innerText = '00:00';
-                            playAlarm();
-                            alert("¡Tiempo de la actividad cumplido!");
-                            resetStopwatch();
-                            return;
-                        }
-                    } else {
-                        swSeconds++;
-                    }
-                    document.getElementById('sw-time').innerText = formatTime(swSeconds);
-                }, 1000);
-            }
-        }
-
-        function stopAndLogStopwatch() {
-            if (swIsCountdown) {
-                // Si era regresivo, ya se guardó al iniciar. Solo lo limpiamos.
-                resetStopwatch();
-                return;
-            }
-            // Si era cronómetro pasivo (hacia arriba)
-            if (swSeconds < 60) {
-                alert("El tiempo es menor a 1 minuto.");
-                return;
-            }
-            clearInterval(swInterval);
-            swIsRunning = false;
-            let mins = Math.floor(swSeconds / 60);
-            resetStopwatch();
             
-            openSessionModal('cardio'); 
-            document.getElementById('input-duration').value = mins;
+            clearInterval(countdownInterval);
+            countdownInterval = setInterval(() => {
+                countdownSeconds--;
+                if (countdownSeconds <= 0) {
+                    clearInterval(countdownInterval);
+                    document.getElementById('sw-time').innerText = '00:00';
+                    playAlarm();
+                    alert("¡Tiempo de la actividad cumplido!");
+                    cancelCountdown();
+                    return;
+                }
+                document.getElementById('sw-time').innerText = formatTime(countdownSeconds);
+            }, 1000);
         }
 
-        function resetStopwatch() {
-            clearInterval(swInterval);
-            swIsRunning = false;
-            swIsCountdown = false;
-            swSeconds = 0;
-            document.getElementById('sw-time').innerText = '00:00';
-            document.getElementById('sw-label').innerText = '> Tocar para iniciar libre';
-            document.getElementById('stopwatch').classList.remove('running');
-            document.getElementById('btn-sw-stop').style.display = 'none';
-            document.getElementById('btn-sw-reset').style.display = 'none';
+        function cancelCountdown() {
+            clearInterval(countdownInterval);
+            document.getElementById('countdown-container').style.display = 'none';
         }
+
+        /* --- CÁLCULO DE SESIÓN DIARIA GLOBAL --- */
+        function endDailySession() {
+            const today = new Date().toLocaleDateString();
+            const todaySessions = state.sessions.filter(s => new Date(s.timestamp).toLocaleDateString() === today);
+            
+            if (todaySessions.length === 0) return;
+
+            // Busca el timestamp más antiguo del día
+            const earliestTimestamp = todaySessions.reduce((min, s) => s.timestamp < min ? s.timestamp : min, todaySessions[0].timestamp);
+            
+            const diffMs = Date.now() - earliestTimestamp;
+            const minsTotal = Math.floor(diffMs / 60000);
+            const hrs = Math.floor(minsTotal / 60);
+            const remainMins = minsTotal % 60;
+            
+            const timeStr = hrs > 0 ? `${hrs}h ${remainMins}m` : `${remainMins} min`;
+            
+            alert(`¡Entrenamiento completado!\n\nTiempo total en el gimnasio hoy:\n> ${timeStr}`);
+        }
+
 
         /* --- INICIALIZACIÓN --- */
         function init() {
@@ -540,16 +511,26 @@
 
         function renderTodayLog() {
             const container = document.getElementById('log-hoy');
+            const sessionPanel = document.getElementById('session-panel');
+            const sessionInfo = document.getElementById('session-info');
+            
             const today = new Date().toLocaleDateString();
             const todaySessions = state.sessions.filter(s => new Date(s.timestamp).toLocaleDateString() === today);
             
             if (todaySessions.length === 0) {
                 container.innerHTML = '<p style="text-align:center; padding: 20px;">> No hay registros hoy.</p>';
+                sessionPanel.style.display = 'none';
                 return;
             }
             
             todaySessions.sort((a, b) => b.timestamp - a.timestamp);
             container.innerHTML = todaySessions.map(getLogHtml).join('');
+            
+            // Renderizar el panel de sesión con la hora de inicio de la actividad más vieja (la última en el array ordenado)
+            const firstSession = todaySessions[todaySessions.length - 1];
+            const startTime = new Date(firstSession.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            sessionInfo.innerText = `> Inicio de sesión: ${startTime}`;
+            sessionPanel.style.display = 'block';
         }
 
         function renderHistory() {
