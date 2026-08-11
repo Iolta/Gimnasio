@@ -348,7 +348,8 @@
         let state = {
             sessions: [],
             customActivities: { cardio: [], fuerza: [], elongacion: [], fisio: [] },
-            settings: { syncEnabled: false, syncUrl: '' }
+            settings: { syncEnabled: false, syncUrl: '' },
+            activeSessionStart: null // <-- Nuevo estado para controlar la sesión activa
         };
 
         let currentActiveCategory = null;
@@ -371,7 +372,6 @@
                 osc.type = 'square';
                 
                 const now = audioCtx.currentTime;
-                // Secuencia de pitidos urgentes tipo cronómetro
                 osc.frequency.setValueAtTime(600, now);
                 osc.frequency.setValueAtTime(800, now + 0.2);
                 osc.frequency.setValueAtTime(600, now + 0.4);
@@ -397,7 +397,7 @@
         }
 
         function startCountdown(seconds) {
-            initAudio(); // Desbloquea el audio mientras ocurre el "click" del usuario
+            initAudio(); 
             document.getElementById('countdown-container').style.display = 'flex';
             countdownSeconds = seconds;
             document.getElementById('sw-time').innerText = formatTime(countdownSeconds);
@@ -423,24 +423,22 @@
             document.getElementById('countdown-container').style.display = 'none';
         }
 
-        /* --- CÁLCULO DE SESIÓN DIARIA GLOBAL --- */
+        /* --- CÁLCULO Y CIERRE DE SESIÓN DIARIA GLOBAL --- */
         function endDailySession() {
-            const today = new Date().toLocaleDateString();
-            const todaySessions = state.sessions.filter(s => new Date(s.timestamp).toLocaleDateString() === today);
-            
-            if (todaySessions.length === 0) return;
+            if (!state.activeSessionStart) return;
 
-            // Busca el timestamp más antiguo del día
-            const earliestTimestamp = todaySessions.reduce((min, s) => s.timestamp < min ? s.timestamp : min, todaySessions[0].timestamp);
-            
-            const diffMs = Date.now() - earliestTimestamp;
+            const diffMs = Date.now() - state.activeSessionStart;
             const minsTotal = Math.floor(diffMs / 60000);
             const hrs = Math.floor(minsTotal / 60);
             const remainMins = minsTotal % 60;
             
             const timeStr = hrs > 0 ? `${hrs}h ${remainMins}m` : `${remainMins} min`;
             
-            alert(`¡Entrenamiento completado!\n\nTiempo total en el gimnasio hoy:\n> ${timeStr}`);
+            alert(`¡Entrenamiento completado!\n\nTiempo total de esta sesión:\n> ${timeStr}`);
+            
+            // Cerramos la sesión
+            state.activeSessionStart = null;
+            saveData();
         }
 
 
@@ -448,7 +446,6 @@
         function init() {
             loadData();
             
-            // Llenar selector de pesos dinámicamente
             const wSelect = document.getElementById('input-weight');
             [2, 5].forEach(w => wSelect.add(new Option(w + ' kg', w)));
             for(let w=10; w<=100; w+=5) {
@@ -470,6 +467,7 @@
             if (savedState) {
                 state = JSON.parse(savedState);
                 if(!state.settings) state.settings = { syncEnabled: false, syncUrl: '' };
+                if(state.activeSessionStart === undefined) state.activeSessionStart = null;
             }
         }
 
@@ -513,24 +511,33 @@
             const container = document.getElementById('log-hoy');
             const sessionPanel = document.getElementById('session-panel');
             const sessionInfo = document.getElementById('session-info');
-            
             const today = new Date().toLocaleDateString();
+            
+            // Validar si la sesión activa es de un día anterior (limpieza automática)
+            if (state.activeSessionStart) {
+                if (new Date(state.activeSessionStart).toLocaleDateString() !== today) {
+                    state.activeSessionStart = null;
+                }
+            }
+
             const todaySessions = state.sessions.filter(s => new Date(s.timestamp).toLocaleDateString() === today);
             
+            // Renderizar la lista
             if (todaySessions.length === 0) {
                 container.innerHTML = '<p style="text-align:center; padding: 20px;">> No hay registros hoy.</p>';
-                sessionPanel.style.display = 'none';
-                return;
+            } else {
+                todaySessions.sort((a, b) => b.timestamp - a.timestamp);
+                container.innerHTML = todaySessions.map(getLogHtml).join('');
             }
-            
-            todaySessions.sort((a, b) => b.timestamp - a.timestamp);
-            container.innerHTML = todaySessions.map(getLogHtml).join('');
-            
-            // Renderizar el panel de sesión con la hora de inicio de la actividad más vieja (la última en el array ordenado)
-            const firstSession = todaySessions[todaySessions.length - 1];
-            const startTime = new Date(firstSession.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-            sessionInfo.innerText = `> Inicio de sesión: ${startTime}`;
-            sessionPanel.style.display = 'block';
+
+            // Mostrar el panel SOLO si hay una sesión activa en el state
+            if (state.activeSessionStart) {
+                const startTime = new Date(state.activeSessionStart).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                sessionInfo.innerText = `> Sesión Activa desde las: ${startTime}`;
+                sessionPanel.style.display = 'block';
+            } else {
+                sessionPanel.style.display = 'none';
+            }
         }
 
         function renderHistory() {
@@ -741,6 +748,17 @@
                 notes: notes
             };
 
+            // Iniciar o mantener la sesión activa global
+            if (state.activeSessionStart) {
+                // Verificar si quedó colgada del día anterior
+                const activeStart = new Date(state.activeSessionStart);
+                if (activeStart.toLocaleDateString() !== new Date().toLocaleDateString()) {
+                    state.activeSessionStart = newSession.timestamp;
+                }
+            } else {
+                state.activeSessionStart = newSession.timestamp;
+            }
+
             state.sessions.push(newSession);
             saveData();
             
@@ -785,6 +803,7 @@
             if (confirm("¿Seguro que quieres borrar todo el historial?")) {
                 state.sessions = [];
                 state.customActivities = { cardio: [], fuerza: [], elongacion: [], fisio: [] };
+                state.activeSessionStart = null;
                 saveData();
                 closeAllModals();
             }
